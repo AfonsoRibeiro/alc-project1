@@ -9,8 +9,11 @@ class Fragment:
         self.deadline = deadline
         self.deps = deps
 
-    def var():
+    def var(self):
         return self.id
+
+    def start_range(self):
+        return range(self.start_time, 1 + self.deadline - self.proc_time)
 
     def __repr__(self):
         return 'Fragment {} {{ task: {}, start: {}, proc_time: {}, deadline: {}, deps: {} }}'.format(
@@ -57,7 +60,6 @@ class Task:
 
             if idx == 0:
                 deps = [task_map[d_id][-1] for d_id in self.deps]
-                print(task_map, self.deps, deps)
             else:
                 deps = [task_map[self.id][idx - 1]]
 

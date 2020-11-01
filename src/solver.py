@@ -1,11 +1,13 @@
 #!/usr/bin/python3
 
 import sys
-
-
-def solve(problem):
-    return 1
-
+import time
+from problem import Problem
 
 if __name__ == '__main__':
-    solve(parse_input(sys.stdin))
+    p = Problem(sys.stdin)
+    begin = time.perf_counter()
+    p.encode()
+    p.compute()
+    p.solve()
+    print('Took {} s'.format(time.perf_counter() - begin), file=sys.stderr)
