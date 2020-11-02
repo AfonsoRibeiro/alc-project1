@@ -2,8 +2,6 @@ from model import *
 
 from pysat.examples.rc2 import RC2
 from pysat.formula import WCNF
-from pysat.card import CardEnc, EncType
-
 
 class Problem:
     def __init__(self, file):
@@ -26,8 +24,10 @@ class Problem:
 
         self.begin_time = min(map(lambda x: x.start_time, self.tasks))
         self.end_time = max(map(lambda x: x.deadline, self.tasks))
+
+        self.min_starts = len(self.frags) + 1 + (self.end_time - self.begin_time)
+        self.max_starts = len(self.frags) + 1 + max(self.frags.keys()) * (self.end_time - self.begin_time) + (self.end_time - 1 - self.begin_time)
         self.solver = RC2(WCNF())
-        self.top_id = self.start(max(self.frags.keys()), self.end_time - 1);
 
     def __repr__(self):
         return '\n'.join(repr(f) for f in self.frags.values())
@@ -59,7 +59,7 @@ class Problem:
         # [1, len(frags)]: whether fragment ID runs
         # [len(frags)+1, len(frags)+1 + max_time * len(frags)]
         assert i in self.frags
-        assert t in self.time_range()
+        assert t in self.frags[i].start_range()
         base = self.end_time - self.begin_time
         return len(self.frags) + 1 + i * base + (t - self.begin_time)
 
@@ -79,25 +79,21 @@ class Problem:
             for i, frag in self.frags.items():
                 # if a frag runs, it starts at some (valid) point
                 self.solver.add_clause([-i] + [self.start(i, t) for t in frag.start_range()])
-                # if a frag doesn't run, it never starts
-                self.solver.add_clause([i] + [-self.start(i, t) for t in self.time_range()])
 
-                for t in self.time_range():
-                    if t in frag.start_range():
-                        # if a frag starts, it runs
-                        self.solver.add_clause([-self.start(i, t), i])
+                for t in frag.start_range():
+                    # if a frag starts, it runs
+                    self.solver.add_clause([-self.start(i, t), i])
 
-                        for p in range(frag.proc_time):
-                            for i2 in filter(lambda k: k != i, self.frags):
+                    for p in range(frag.proc_time):
+                        for i2 in filter(lambda k: k != i, self.frags):
+                            if t + p in self.frags[i2].start_range():
                                 self.solver.add_clause([-self.start(i, t), -self.start(i2, t + p)])
-                    else:
-                        self.solver.add_clause([-self.start(i, t)])
 
         def encode_dependencies(self):
             for i, frag in self.frags.items():
                 for dep in map(lambda i: self.frags[i], frag.deps):
                     for t in frag.start_range():
-                        self.solver.add_clause([-self.start(i, t)] + [self.start(dep.id, tdep) for tdep in range(self.begin_time, t)])
+                        self.solver.add_clause([-self.start(i, t)] + [self.start(dep.id, tdep) for tdep in dep.start_range() if tdep < t])
 
         def encode_soft_clauses(self):
             # the soft clauses are based on the first fragment of each task
@@ -134,7 +130,7 @@ class Problem:
 
         task_running = { t: [False for _ in self.task_map] for t in range(self.begin_time, self.end_time)}
         frag_running = { t: [False for _ in self.frags] for t in range(self.begin_time, self.end_time)}
-        for frag, time in map(reverse_starts, filter(lambda x: x in range(self.start(1, self.begin_time), self.start(max(self.frags.keys()), self.end_time - 1)+1), self.solver.model)):
+        for frag, time in map(reverse_starts, filter(lambda x: x in range(self.min_starts, self.max_starts + 1), self.solver.model)):
             for t in range(time, time+self.frags[frag].proc_time):
                 frag_running[t][frag - 1] = True
                 task_running[t][self.frags[frag].task_id - 1] = True
@@ -156,7 +152,7 @@ class Problem:
             return norm // base, norm % base + self.begin_time
 
         self.compute()
-        starts_map = {frag: time for frag, time in map(reverse_starts, filter(lambda x: x in range(self.start(1, self.begin_time), self.start(max(self.frags.keys()), self.end_time - 1)+1), self.solver.model))}
+        starts_map = {frag: time for frag, time in map(reverse_starts, filter(lambda x: x in range(self.min_starts, self.max_starts + 1), self.solver.model))}
         print(len(self.tasks) - self.solver.cost)
         for task, frags in self.task_map.items():
             start_times = [starts_map[f] for f in frags if f in starts_map]
