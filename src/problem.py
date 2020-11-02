@@ -22,6 +22,8 @@ class Problem:
                     self.task_map) for t in self.tasks),
                 list())}
 
+        self._transitive_dep_closure()
+
         self.begin_time = min(map(lambda x: x.start_time, self.tasks))
         self.end_time = max(map(lambda x: x.deadline, self.tasks))
         self.solver = RC2(WCNF())
@@ -29,6 +31,21 @@ class Problem:
 
     def __repr__(self):
         return '\n'.join(repr(f) for f in self.frags.values())
+
+    def _transitive_dep_closure(self):
+        # private method
+        # finds the transitive closure of dependencies
+        # ie: if F1 depends on F2 and F2 depends on F3, add a dependency from F1 to F3
+        #
+        deps = dict()
+        def find_deps(i):
+            if i in deps: return deps[i]
+            ideps = sum(map(lambda x: find_deps(x), self.frags[i].deps), self.frags[i].deps)
+            deps[i] = ideps
+            return deps[i]
+
+        for i, f in self.frags.items():
+            f.deps = find_deps(i)
 
     def time_range(self):
         return range(self.begin_time, self.end_time)
@@ -147,7 +164,7 @@ class Problem:
                 print('{} {}'.format(task, ' '.join(str(i) for i in start_times)))
 
 if __name__ == '__main__':
-    s = Problem(open('../test1.txt'))
+    s = Problem(open('../tests/test1.sms'))
     print(s)
     s.encode()
     s.compute()
