@@ -27,7 +27,7 @@ class Problem:
 
         self.min_starts = len(self.frags) + 1 + (self.end_time - self.begin_time)
         self.max_starts = len(self.frags) + 1 + max(self.frags.keys()) * (self.end_time - self.begin_time) + (self.end_time - 1 - self.begin_time)
-        self.solver = RC2(WCNF())
+        self.solver = RC2(WCNF(), exhaust=True)
 
     def __repr__(self):
         return '\n'.join(repr(f) for f in self.frags.values())
