@@ -14,13 +14,15 @@ class Problem:
             self.task_map[t.id] = list(range(id, id + len(t.frags)))
             id += len(t.frags)
 
+        #self._transitive_task_closure()
+
         self.frags = {
             f.id: f for f in sum(
                 (t.generate_frags(
                     self.task_map) for t in self.tasks),
                 list())}
 
-        self._transitive_dep_closure()
+        #self._transitive_dep_closure()
 
         self.begin_time = min(map(lambda x: x.start_time, self.tasks))
         self.end_time = max(map(lambda x: x.deadline, self.tasks))
@@ -31,6 +33,21 @@ class Problem:
 
     def __repr__(self):
         return '\n'.join(repr(f) for f in self.frags.values())
+
+    def _transitive_task_closure(self):
+        # private method
+        # finds the transitive closure of dependencies
+        # ie: if T1 depends on T2 and T2 depends on T3, add a dependency from T1 to T3
+        #
+        deps = dict()
+        def find_deps(t):
+            if t in deps: return deps[t]
+            ideps = sum(map(lambda x: find_deps(self.tasks[x - 1]), t.deps), t.deps)
+            deps[t] = ideps
+            return deps[t]
+
+        for t in self.tasks:
+            t.deps = find_deps(t)
 
     def _transitive_dep_closure(self):
         # private method
@@ -93,7 +110,10 @@ class Problem:
             for i, frag in self.frags.items():
                 for dep in map(lambda i: self.frags[i], frag.deps):
                     for t in frag.start_range():
-                        self.solver.add_clause([-self.start(i, t)] + [self.start(dep.id, tdep) for tdep in dep.start_range() if tdep < t])
+                        self.solver.add_clause([-self.start(i, t)] + [self.start(dep.id, tdep) for tdep in dep.start_range() if tdep + dep.proc_time <= t])
+                    for tdep in dep.start_range():
+                        self.solver.add_clause([-self.start(dep.id, tdep), -i] + [self.start(i, t) for t in frag.start_range() if tdep + dep.proc_time <= t])
+
 
         def encode_soft_clauses(self):
             # the soft clauses are based on the first fragment of each task

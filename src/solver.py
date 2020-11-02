@@ -10,4 +10,4 @@ if __name__ == '__main__':
     p.encode()
     p.compute()
     p.solve()
-    print('Took {} s'.format(time.perf_counter() - begin), file=sys.stderr)
+    print('{} s'.format(time.perf_counter() - begin), file=sys.stderr)
