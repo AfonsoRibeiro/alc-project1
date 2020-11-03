@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env zsh
 
 for input in $(ls tests/*.sms)
 do
@@ -19,10 +19,10 @@ do
         reps=1
     fi
 
-    for i in {0..$reps};
+    for i in {1..$reps};
     do
         tmpfile=.$(basename $input).out.tmp
-        >&2 echo -n "$input\t\t"
+        >&2 echo -ne "$input\t\t"
         src/solver.py < $input > $tmpfile
         #echo "Produced output"
         ./proj1-checker/proj1-checker $input $tmpfile | grep 'OK!' > /dev/null
