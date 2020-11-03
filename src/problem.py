@@ -110,10 +110,10 @@ class Problem:
             for i, frag in self.frags.items():
                 for dep in map(lambda i: self.frags[i], frag.deps):
                     for t in frag.start_range():
-                        self.solver.add_clause([-self.start(i, t)] + [self.start(dep.id, tdep) for tdep in dep.start_range() if tdep < t])
-                        #self.solver.add_clause([-self.start(i, t)] + [self.start(dep.id, tdep) for tdep in dep.start_range() if tdep + dep.proc_time <= t])
-                    #for tdep in dep.start_range():
-                     #   self.solver.add_clause([-self.start(dep.id, tdep), -i] + [self.start(i, t) for t in frag.start_range() if tdep + dep.proc_time <= t])
+                        #self.solver.add_clause([-self.start(i, t)] + [self.start(dep.id, tdep) for tdep in dep.start_range() if tdep < t])
+                        self.solver.add_clause([-self.start(i, t)] + [self.start(dep.id, tdep) for tdep in dep.start_range() if tdep + dep.proc_time <= t])
+                    for tdep in dep.start_range():
+                        self.solver.add_clause([-self.start(dep.id, tdep), -i] + [self.start(i, t) for t in frag.start_range() if tdep + dep.proc_time <= t])
 
 
         def encode_soft_clauses(self):
