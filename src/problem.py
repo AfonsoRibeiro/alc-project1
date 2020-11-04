@@ -32,7 +32,7 @@ class Problem:
         self.min_starts = len(self.frags) + 1 + base
         self.max_starts = len(self.frags) + 1 + max(self.frags.keys()) * base + (base - 1)
         self.top_id = self.max_starts + 1
-        self.solver = RC2(WCNF(), exhaust=True)
+        self.solver = RC2(WCNF(), exhaust=True, adapt=True)
 
     def __repr__(self):
         return '\n'.join(repr(f) for f in self.frags.values())
@@ -106,8 +106,22 @@ class Problem:
                 cnf = CardEnc.atmost(lits=lits,  bound=1, top_id=self.top_id, encoding=enctype)
                 if len(cnf.clauses) > 0:
                     self.top_id = max([self.top_id] + [max(c) for c in cnf.clauses if len(c) > 0])
-                for c in cnf:
-                    self.solver.add_clause([-self.start(i, t)] + c)
+                for c in cnf.clauses:
+                    self.solver.add_clause([-self.start(i, t)] + [a for a in c])
+
+            def card_per_proc_encoding(i, t, frag, enctype):
+                # while a frag is running, no other frags are running
+                for i2 in filter(lambda k: k != i, self.frags):
+                    lits = [self.start(i, t)]
+                    for p in range(frag.proc_time):
+                        if t + p in self.frags[i2].start_range():
+                            lits.append(self.start(i2, t+p))
+
+                    cnf = CardEnc.atmost(lits=lits,  bound=1, top_id=self.top_id, encoding=enctype)
+                    if len(cnf.clauses) > 0:
+                        self.top_id = max([self.top_id] + [max(c) for c in cnf.clauses if len(c) > 0])
+                    for c in cnf.clauses:
+                        self.solver.add_clause([-self.start(i, t)] + [a for a in c])
 
             def pairwaise_encoding(i, t, frag):
                 for p in range(frag.proc_time):
@@ -124,7 +138,9 @@ class Problem:
                     self.solver.add_clause([-self.start(i, t), i])
 
                     # while a frag is running, no other frags are running
-                    card_encoding(i, t, frag, EncType.seqcounter)
+                    # good encodings: seqcounter, cardnetwrk
+                    # card_encoding(i, t, frag, EncType.seqcounter)
+                    card_per_proc_encoding(i, t, frag, EncType.cardnetwrk)
                     #pairwaise_encoding(i, t, frag)
 
         def encode_dependencies(self):
