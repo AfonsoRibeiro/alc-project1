@@ -1,6 +1,7 @@
 from model import *
 
 from pysat.examples.rc2 import RC2
+from pysat.card import CardEnc, EncType
 from pysat.formula import WCNF
 
 class Problem:
@@ -27,8 +28,10 @@ class Problem:
         self.begin_time = min(map(lambda x: x.start_time, self.tasks))
         self.end_time = max(map(lambda x: x.deadline, self.tasks))
 
-        self.min_starts = len(self.frags) + 1 + (self.end_time - self.begin_time)
-        self.max_starts = len(self.frags) + 1 + max(self.frags.keys()) * (self.end_time - self.begin_time) + (self.end_time - 1 - self.begin_time)
+        base = self.end_time - self.begin_time
+        self.min_starts = len(self.frags) + 1 + base
+        self.max_starts = len(self.frags) + 1 + max(self.frags.keys()) * base + (base - 1)
+        self.top_id = self.max_starts + 1
         self.solver = RC2(WCNF(), exhaust=True)
 
     def __repr__(self):
@@ -93,6 +96,25 @@ class Problem:
                     self.solver.add_clause([-f1, f2])
 
         def encode_start(self):
+            def card_encoding(i, t, frag, enctype):
+                # while a frag is running, no other frags are running
+                lits = [self.start(i, t)]
+                for p in range(frag.proc_time):
+                    for i2 in filter(lambda k: k != i, self.frags):
+                        if t + p in self.frags[i2].start_range():
+                            lits.append(self.start(i2, t+p))
+                cnf = CardEnc.atmost(lits=lits,  bound=1, top_id=self.top_id, encoding=enctype)
+                if len(cnf.clauses) > 0:
+                    self.top_id = max([self.top_id] + [max(c) for c in cnf.clauses if len(c) > 0])
+                for c in cnf:
+                    self.solver.add_clause([-self.start(i, t)] + c)
+
+            def pairwaise_encoding(i, t, frag):
+                for p in range(frag.proc_time):
+                    for i2 in filter(lambda k: k != i, self.frags):
+                        if t + p in self.frags[i2].start_range():
+                            self.solver.add_clause([-self.start(i, t), -self.start(i2, t + p)])
+
             for i, frag in self.frags.items():
                 # if a frag runs, it starts at some (valid) point
                 self.solver.add_clause([-i] + [self.start(i, t) for t in frag.start_range()])
@@ -101,17 +123,17 @@ class Problem:
                     # if a frag starts, it runs
                     self.solver.add_clause([-self.start(i, t), i])
 
-                    for p in range(frag.proc_time):
-                        for i2 in filter(lambda k: k != i, self.frags):
-                            if t + p in self.frags[i2].start_range():
-                                self.solver.add_clause([-self.start(i, t), -self.start(i2, t + p)])
+                    # while a frag is running, no other frags are running
+                    card_encoding(i, t, frag, EncType.seqcounter)
+                    #pairwaise_encoding(i, t, frag)
 
         def encode_dependencies(self):
             for i, frag in self.frags.items():
                 for dep in map(lambda i: self.frags[i], frag.deps):
                     for t in frag.start_range():
-                        #self.solver.add_clause([-self.start(i, t)] + [self.start(dep.id, tdep) for tdep in dep.start_range() if tdep < t])
                         self.solver.add_clause([-self.start(i, t)] + [self.start(dep.id, tdep) for tdep in dep.start_range() if tdep + dep.proc_time <= t])
+
+                    # this is an extra clause (for over constraining)
                     for tdep in dep.start_range():
                         self.solver.add_clause([-self.start(dep.id, tdep), -i] + [self.start(i, t) for t in frag.start_range() if tdep + dep.proc_time <= t])
 
