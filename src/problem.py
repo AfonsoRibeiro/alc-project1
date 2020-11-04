@@ -3,9 +3,10 @@ from model import *
 from pysat.examples.rc2 import RC2
 from pysat.card import CardEnc, EncType
 from pysat.formula import WCNF
+import datetime
 
 class Problem:
-    def __init__(self, file):
+    def __init__(self, file, solver_type):
         n = int(file.readline().strip())
         self.tasks = [Task.from_line(i, file.readline()) for i in range(1, n+1)]
         self.task_map = dict()
@@ -32,7 +33,8 @@ class Problem:
         self.min_starts = len(self.frags) + 1 + base
         self.max_starts = len(self.frags) + 1 + max(self.frags.keys()) * base + (base - 1)
         self.top_id = self.max_starts + 1
-        self.solver = RC2(WCNF(), exhaust=True, adapt=True)
+        self.formula = WCNF()
+        self.solver_type = solver_type
 
     def __repr__(self):
         return '\n'.join(repr(f) for f in self.frags.values())
@@ -93,7 +95,7 @@ class Problem:
 
             for task in self.task_map.values():
                 for f1, f2 in zip([task[-1]] + task[:-1], task):
-                    self.solver.add_clause([-f1, f2])
+                    self.formula.append([-f1, f2])
 
         def encode_start(self):
             def card_encoding(i, t, frag, enctype):
@@ -107,7 +109,7 @@ class Problem:
                 if len(cnf.clauses) > 0:
                     self.top_id = max([self.top_id] + [max(c) for c in cnf.clauses if len(c) > 0])
                 for c in cnf.clauses:
-                    self.solver.add_clause([-self.start(i, t)] + [a for a in c])
+                    self.formula.append([-self.start(i, t)] + [a for a in c])
 
             def card_per_proc_encoding(i, t, frag, enctype):
                 # while a frag is running, no other frags are running
@@ -117,41 +119,42 @@ class Problem:
                         if t + p in self.frags[i2].start_range():
                             lits.append(self.start(i2, t+p))
 
-                    cnf = CardEnc.atmost(lits=lits,  bound=1, top_id=self.top_id, encoding=enctype)
-                    if len(cnf.clauses) > 0:
-                        self.top_id = max([self.top_id] + [max(c) for c in cnf.clauses if len(c) > 0])
-                    for c in cnf.clauses:
-                        self.solver.add_clause([-self.start(i, t)] + [a for a in c])
+                    if len(lits) > 0:
+                        cnf = CardEnc.atmost(lits=lits,  bound=1, top_id=self.top_id, encoding=enctype)
+                        if len(cnf.clauses) > 0:
+                            self.top_id = max([self.top_id] + [max(c) for c in cnf.clauses if len(c) > 0])
+                        for c in cnf.clauses:
+                            self.formula.append([-self.start(i, t)] + [a for a in c])
 
             def pairwaise_encoding(i, t, frag):
                 for p in range(frag.proc_time):
                     for i2 in filter(lambda k: k != i, self.frags):
                         if t + p in self.frags[i2].start_range():
-                            self.solver.add_clause([-self.start(i, t), -self.start(i2, t + p)])
+                            self.formula.append([-self.start(i, t), -self.start(i2, t + p)])
 
             for i, frag in self.frags.items():
                 # if a frag runs, it starts at some (valid) point
-                self.solver.add_clause([-i] + [self.start(i, t) for t in frag.start_range()])
+                self.formula.append([-i] + [self.start(i, t) for t in frag.start_range()])
 
                 for t in frag.start_range():
                     # if a frag starts, it runs
-                    self.solver.add_clause([-self.start(i, t), i])
+                    self.formula.append([-self.start(i, t), i])
 
                     # while a frag is running, no other frags are running
                     # good encodings: seqcounter, cardnetwrk
                     # card_encoding(i, t, frag, EncType.seqcounter)
-                    card_per_proc_encoding(i, t, frag, EncType.cardnetwrk)
-                    #pairwaise_encoding(i, t, frag)
+                    # card_per_proc_encoding(i, t, frag, EncType.cardnetwrk)
+                    pairwaise_encoding(i, t, frag)
 
         def encode_dependencies(self):
             for i, frag in self.frags.items():
                 for dep in map(lambda i: self.frags[i], frag.deps):
                     for t in frag.start_range():
-                        self.solver.add_clause([-self.start(i, t)] + [self.start(dep.id, tdep) for tdep in dep.start_range() if tdep + dep.proc_time <= t])
+                        self.formula.append([-self.start(i, t)] + [self.start(dep.id, tdep) for tdep in dep.start_range() if tdep + dep.proc_time <= t])
 
                     # this is an extra clause (for over constraining)
                     for tdep in dep.start_range():
-                        self.solver.add_clause([-self.start(dep.id, tdep), -i] + [self.start(i, t) for t in frag.start_range() if tdep + dep.proc_time <= t])
+                        self.formula.append([-self.start(dep.id, tdep), -i] + [self.start(i, t) for t in frag.start_range() if tdep + dep.proc_time <= t])
 
 
         def encode_soft_clauses(self):
@@ -159,7 +162,7 @@ class Problem:
             # if that fragment runs then the task itself runs
 
             for t, frag_list in self.task_map.items():
-                self.solver.add_clause([frag_list[0]], weight=1)
+                self.formula.append([frag_list[0]], weight=1)
 
         # atomicity of tasks
         encode_atomicity(self)
@@ -175,11 +178,25 @@ class Problem:
 
     def compute(self):
         # get a model
-        assert self.solver.compute(), 'UNSAT'
-        return self.solver.model, self.solver.cost
+        if self.solver_type.lower() == 'rc2':
+            self.solver = RC2(self.formula, exhaust=True)
+            assert self.solver.compute(), 'UNSAT'
+            self.model = self.solver.model
+            self.cost = self.solver.cost
+        else:
+            filename = '.formula.{}.wcnf'.format(datetime.datetime.now())
+            if self.solver_type.lower() == 'maxhs':
+                bin = 'solvers/maxhs'
+            elif self.solver_type.lower() == 'uwrmaxsat':
+                bin = 'solvers/uwrmaxsat'
+            self.formula.to_file(filename)
+            self.model = []
+            self.cost = 0
+
+        return self.model, self.cost
 
     def disallow_current_model(self):
-        self.solver.add_clause([-v for v in filter(lambda x: x in self.frags or -x in self.frags, self.solver.model)])
+        self.formula.append([-v for v in filter(lambda x: x in self.frags or -x in self.frags, self.model)])
 
     def interpret(self):
         def reverse_starts(v):
@@ -189,20 +206,20 @@ class Problem:
 
         task_running = { t: [False for _ in self.task_map] for t in range(self.begin_time, self.end_time)}
         frag_running = { t: [False for _ in self.frags] for t in range(self.begin_time, self.end_time)}
-        for frag, time in map(reverse_starts, filter(lambda x: x in range(self.min_starts, self.max_starts + 1), self.solver.model)):
+        for frag, time in map(reverse_starts, filter(lambda x: x in range(self.min_starts, self.max_starts + 1), self.model)):
             for t in range(time, time+self.frags[frag].proc_time):
                 frag_running[t][frag - 1] = True
                 task_running[t][self.frags[frag].task_id - 1] = True
 
-        print('Tasks completed: {}'.format(len(self.tasks) - self.solver.cost))
+        print('Tasks completed: {}'.format(len(self.tasks) - self.cost))
         print('{:>10s}\t{}'.format('Fragment', '\t'.join('{:^4d}'.format(f) for f in self.frags)))
         for t in range(self.begin_time, self.end_time):
-            print('{:>10d}\t{}'.format(t, '\t'.join('{:^4s}'.format('x' if frag_running[t][frag-1] in self.solver.model else '') for frag in self.frags)))
+            print('{:>10d}\t{}'.format(t, '\t'.join('{:^4s}'.format('x' if frag_running[t][frag-1] in self.model else '') for frag in self.frags)))
 
         print()
         print('{:>10s}\t{}'.format('Task', '\t'.join('{:^4d}'.format(t) for t in self.task_map)))
         for t in range(self.begin_time, self.end_time):
-            print('{:>10d}\t{}'.format(t, '\t'.join('{:^4s}'.format('x' if task_running[t][task-1] in self.solver.model else '') for task in self.task_map)))
+            print('{:>10d}\t{}'.format(t, '\t'.join('{:^4s}'.format('x' if task_running[t][task-1] in self.model else '') for task in self.task_map)))
 
     def solve(self):
         def reverse_starts(v):
@@ -211,8 +228,8 @@ class Problem:
             return norm // base, norm % base + self.begin_time
 
         self.compute()
-        starts_map = {frag: time for frag, time in map(reverse_starts, filter(lambda x: x in range(self.min_starts, self.max_starts + 1), self.solver.model))}
-        print(len(self.tasks) - self.solver.cost)
+        starts_map = {frag: time for frag, time in map(reverse_starts, filter(lambda x: x in range(self.min_starts, self.max_starts + 1), self.model))}
+        print(len(self.tasks) - self.cost)
         for task, frags in self.task_map.items():
             start_times = [starts_map[f] for f in frags if f in starts_map]
             if len(start_times) > 0:
@@ -222,6 +239,4 @@ if __name__ == '__main__':
     s = Problem(open('../tests/test1.sms'))
     print(s)
     s.encode()
-    s.compute()
-    #s.interpret()
     s.solve()
