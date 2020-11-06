@@ -3,6 +3,8 @@ from model import *
 from pysat.examples.rc2 import RC2
 from pysat.card import CardEnc, EncType
 from pysat.formula import WCNF
+import subprocess
+import shlex
 import datetime
 
 class Problem:
@@ -16,7 +18,7 @@ class Problem:
             self.task_map[t.id] = list(range(id, id + len(t.frags)))
             id += len(t.frags)
 
-        #self._transitive_task_closure()
+        self._transitive_task_closure()
 
         self.frags = {
             f.id: f for f in sum(
@@ -183,15 +185,15 @@ class Problem:
             assert self.solver.compute(), 'UNSAT'
             self.model = self.solver.model
             self.cost = self.solver.cost
-        else:
-            filename = '.formula.{}.wcnf'.format(datetime.datetime.now())
-            if self.solver_type.lower() == 'maxhs':
-                bin = 'solvers/maxhs'
-            elif self.solver_type.lower() == 'uwrmaxsat':
-                bin = 'solvers/uwrmaxsat'
+        elif self.solver_type.lower() == 'uwrmaxsat':
+            bin = 'solvers/uwrmaxsat  -v0 -no-sat -m '
+            filename = '.formula.{}.wcnf'.format(datetime.datetime.now()).replace(' ', '_')
             self.formula.to_file(filename)
-            self.model = []
-            self.cost = 0
+            output = subprocess.check_output(shlex.split('{} {}'.format(bin, filename))).decode('utf-8')
+            subprocess.run(shlex.split('rm {}'.format(filename)))
+            assert 's OPTIMUM FOUND' in output, 'UNSAT'
+            self.cost = int(output.split('\no ')[1].split('\n')[0])
+            self.model = [int(a) for a in output.split('\nv ')[1].split('\n')[0].split()]
 
         return self.model, self.cost
 
@@ -237,6 +239,5 @@ class Problem:
 
 if __name__ == '__main__':
     s = Problem(open('../tests/test1.sms'))
-    print(s)
     s.encode()
     s.solve()
