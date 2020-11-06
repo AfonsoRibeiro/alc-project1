@@ -18,7 +18,7 @@ class Problem:
             self.task_map[t.id] = list(range(id, id + len(t.frags)))
             id += len(t.frags)
 
-        self._transitive_task_closure()
+        #self._transitive_task_closure()
 
         self.frags = {
             f.id: f for f in sum(
